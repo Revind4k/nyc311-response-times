@@ -1,0 +1,29 @@
+[project]
+name = "nyc311-response-times"
+version = "0.1.0"
+description = "How long NYC takes to close 311 service requests: a year of data, DuckDB SQL, and survival analysis for tickets that are still open."
+authors = [
+    { name = "Eren Han Yasar", email = "drknse@gmail.com" }
+]
+requires-python = ">=3.12"
+dependencies = [
+    "duckdb>=2.0.0",
+    "httpx>=0.28.1",
+    "numpy>=2.5.4",
+]
+
+[tool.uv]
+package = false
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+
+[tool.ruff]
+line-length = 120
+
+[dependency-groups]
+dev = [
+    "pytest>=9.2.0",
+    "ruff>=0.17.3",
+]

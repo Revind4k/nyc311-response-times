@@ -1,0 +1,157 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>NYC 311 Response Times</title>
+<script src="https://cdn.jsdelivr.net/npm/vega@5.30.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-lite@5.21.0"></script>
+<script src="https://cdn.jsdelivr.net/npm/vega-embed@6.26.0"></script>
+<style>
+  :root { --bg: #fbfaf7; --fg: #1d1d1b; --muted: #6b6a66; --line: #e2e0da; --accent: #c2410c; --accent2: #1d4ed8; }
+  @media (prefers-color-scheme: dark) {
+    :root { --bg: #161615; --fg: #ecebe7; --muted: #a3a29c; --line: #34332f; --accent: #fb923c; --accent2: #93c5fd; }
+  }
+  * { box-sizing: border-box; }
+  body { margin: 0; background: var(--bg); color: var(--fg); font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif; }
+  main { max-width: 920px; margin: 0 auto; padding: 32px 16px 64px; }
+  h1 { font-size: 1.9rem; margin: 0 0 4px; letter-spacing: -0.01em; }
+  h2 { font-size: 1.15rem; margin: 40px 0 6px; }
+  p { margin: 6px 0 12px; }
+  .muted { color: var(--muted); }
+  .stats { display: grid; grid-template-columns: repeat(auto-fit, minmax(170px, 1fr)); gap: 12px; margin: 24px 0; }
+  .stat { border: 1px solid var(--line); border-radius: 8px; padding: 12px 14px; }
+  .stat b { display: block; font-size: 1.5rem; font-variant-numeric: tabular-nums; }
+  .chart { width: 100%; overflow-x: auto; }
+  table { border-collapse: collapse; width: 100%; font-size: 0.9rem; font-variant-numeric: tabular-nums; }
+  th, td { text-align: left; padding: 6px 8px; border-bottom: 1px solid var(--line); }
+  th { font-weight: 600; }
+  td.n { text-align: right; }
+  a { color: var(--accent2); }
+  footer { margin-top: 48px; font-size: 0.85rem; }
+</style>
+</head>
+<body>
+<main>
+  <h1>How long does NYC take to close a 311 request?</h1>
+  <p class="muted">Every 311 service request created in 2025, from NYC Open Data (dataset erm2-nwe9).
+    Requests still open when the data was pulled are kept as <em>censored</em> rather than dropped;
+    wait times are Kaplan-Meier estimates.</p>
+
+  <div class="stats" id="stats"></div>
+
+  <h2>Share of requests still open, by agency</h2>
+  <p class="muted">Kaplan-Meier survival curves. Hours since the request was created, log scale.
+    Parks and TLC requests are the ones that stay open for months.</p>
+  <div class="chart" id="curves"></div>
+
+  <h2>Dropping open requests understates the wait</h2>
+  <p class="muted">Median time to close per agency: the naive median over closed requests only,
+    and the Kaplan-Meier median that counts still-open requests as waiting.</p>
+  <div class="chart" id="bias"></div>
+
+  <h2>The 20 most common complaint types</h2>
+  <p class="muted">Kaplan-Meier median (dot) and 90th percentile (end of bar), log scale.</p>
+  <div class="chart" id="types"></div>
+
+  <h2>Heat and hot water complaints through the year</h2>
+  <p class="muted">Request volume and median time to close, by month created.</p>
+  <div class="chart" id="heat"></div>
+
+  <h2>Data quality</h2>
+  <p class="muted">Every row is kept and given a verdict; the analysis reads only rows marked ok.</p>
+  <table id="quality"></table>
+
+  <footer class="muted">
+    Source: <a href="https://data.cityofnewyork.us/Social-Services/311-Service-Requests-from-2010-to-Present/erm2-nwe9">NYC Open Data, 311 Service Requests</a>.
+    Code and method: <a href="https://github.com/Revind4k/nyc311-response-times">github.com/Revind4k/nyc311-response-times</a>.
+    <span id="pulled"></span>
+  </footer>
+</main>
+<script>
+const fmt = h => h == null ? "not reached" : h < 1 ? `${Math.round(h * 60)} min` : h < 48 ? `${h.toFixed(1)} h` : `${(h / 24).toFixed(1)} days`;
+const dark = matchMedia("(prefers-color-scheme: dark)").matches;
+const css = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+const config = {
+  background: null, font: "system-ui, sans-serif",
+  axis: { labelColor: css("--muted"), titleColor: css("--muted"), gridColor: css("--line"), domainColor: css("--line"), tickColor: css("--line") },
+  legend: { labelColor: css("--fg"), titleColor: css("--muted") },
+  view: { stroke: null }, range: { category: { scheme: dark ? "tableau10" : "tableau10" } }
+};
+const embed = (id, spec) => vegaEmbed(id, { $schema: "https://vega.github.io/schema/vega-lite/v5.json", width: "container", config, ...spec }, { actions: false });
+
+fetch("data.json").then(r => r.json()).then(d => {
+  const o = d.overall;
+  const total = d.quality.reduce((s, [, n]) => s + n, 0);
+  document.getElementById("stats").innerHTML = [
+    ["Requests in 2025", total.toLocaleString()],
+    ["Median time to close", fmt(o.km_median_h)],
+    ["90th percentile", fmt(o.km_p90_h)],
+    ["Still open at pull", `${(o.open_share * 100).toFixed(1)}%`],
+  ].map(([k, v]) => `<div class="stat"><b>${v}</b><span class="muted">${k}</span></div>`).join("");
+  document.getElementById("pulled").textContent = `Data pulled ${d.pulled[1].slice(0, 10)}.`;
+
+  const curveRows = Object.entries(d.curves.agencies).flatMap(([agency, s]) =>
+    s.map((v, i) => ({ agency, hours: d.curves.hours[i], open: v })));
+  embed("#curves", {
+    height: 300, data: { values: curveRows },
+    mark: { type: "line", interpolate: "step-after", strokeWidth: 2 },
+    encoding: {
+      x: { field: "hours", type: "quantitative", scale: { type: "log" }, title: "Hours since created",
+           axis: { values: [1, 6, 24, 168, 720, 4380], labelExpr: "{1:'1 h',6:'6 h',24:'1 day',168:'1 week',720:'30 days',4380:'6 months'}[datum.value]" } },
+      y: { field: "open", type: "quantitative", axis: { format: "%" }, title: "Still open" },
+      color: { field: "agency", type: "nominal", title: null },
+      tooltip: [{ field: "agency" }, { field: "hours", format: ".1f" }, { field: "open", format: ".1%" }]
+    }
+  });
+
+  const biasRows = d.by_agency.flatMap(r => [
+    { agency: r.agency, method: "Closed requests only", h: r.naive_median_h },
+    { agency: r.agency, method: "Kaplan-Meier", h: r.km_median_h }]);
+  embed("#bias", {
+    height: { step: 22 }, data: { values: biasRows },
+    layer: [
+      { mark: { type: "rule", color: css("--line") }, encoding: { x: { aggregate: "min", field: "h" }, x2: { aggregate: "max", field: "h" } } },
+      { mark: { type: "point", filled: true, size: 70 },
+        encoding: { color: { field: "method", type: "nominal", title: null, scale: { range: [css("--muted"), css("--accent")] } },
+                    tooltip: [{ field: "agency" }, { field: "method" }, { field: "h", title: "hours", format: ".1f" }] } }
+    ],
+    encoding: {
+      y: { field: "agency", type: "nominal", sort: { field: "h", op: "max", order: "descending" }, title: null },
+      x: { field: "h", type: "quantitative", scale: { type: "log" }, title: "Median hours to close (log)" }
+    }
+  });
+
+  embed("#types", {
+    height: { step: 20 }, data: { values: d.by_type.filter(r => r.km_median_h != null) },
+    encoding: { y: { field: "complaint_type", type: "nominal", sort: { field: "km_median_h", order: "descending" }, title: null } },
+    layer: [
+      { mark: { type: "bar", height: 3, color: css("--line") },
+        encoding: { x: { field: "km_median_h", type: "quantitative", scale: { type: "log" }, title: "Hours to close (log)" }, x2: { field: "km_p90_h" } } },
+      { mark: { type: "point", filled: true, size: 60, color: css("--accent") },
+        encoding: { x: { field: "km_median_h", type: "quantitative" },
+                    tooltip: [{ field: "complaint_type", title: "type" }, { field: "n", title: "requests", format: "," },
+                              { field: "km_median_h", title: "median h", format: ".1f" }, { field: "km_p90_h", title: "p90 h", format: ".1f" }] } }
+    ]
+  });
+
+  embed("#heat", {
+    height: 220, data: { values: d.monthly["HEAT/HOT WATER"] },
+    encoding: { x: { field: "month", type: "ordinal", title: "Month created (2025)",
+                     axis: { labelExpr: "['','Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'][datum.value]", labelAngle: 0 } } },
+    layer: [
+      { mark: { type: "bar", color: css("--line") },
+        encoding: { y: { field: "n", type: "quantitative", title: "Requests" }, tooltip: [{ field: "n", format: "," }] } },
+      { mark: { type: "line", point: { color: css("--accent") }, color: css("--accent") },
+        encoding: { y: { field: "km_median_h", type: "quantitative", title: "Median hours to close" },
+                    tooltip: [{ field: "km_median_h", title: "median h", format: ".1f" }] } }
+    ],
+    resolve: { scale: { y: "independent" } }
+  });
+
+  document.getElementById("quality").innerHTML = "<tr><th>Verdict</th><th class='n'>Requests</th></tr>" +
+    d.quality.map(([q, n]) => `<tr><td>${q.replaceAll("_", " ")}</td><td class="n">${n.toLocaleString()}</td></tr>`).join("");
+});
+</script>
+</body>
+</html>
