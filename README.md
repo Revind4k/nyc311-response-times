@@ -1,5 +1,7 @@
 # nyc311-response-times
 
+[![CI](https://github.com/Revind4k/nyc311-response-times/actions/workflows/ci.yml/badge.svg)](https://github.com/Revind4k/nyc311-response-times/actions/workflows/ci.yml)
+
 How long does New York City take to close a 311 service request? This project loads every request created in 2025 (3,655,042 of them) from NYC Open Data into DuckDB, classifies data-quality problems instead of silently dropping them, and estimates wait times with **Kaplan-Meier survival analysis**, so requests that are still open count as "still waiting" rather than disappearing from the average.
 
 **Dashboard:** https://revind4k.github.io/nyc311-response-times/
@@ -105,11 +107,12 @@ uv run pytest
 
 ## Tests
 
-`uv run pytest` runs 8 offline tests on every push (GitHub Actions, along with ruff):
+`uv run pytest` runs 15 offline tests on every push (GitHub Actions, along with ruff):
 
 - the Kaplan-Meier estimator against the published 6-MP curve, the no-censoring case (where it must equal the plain empirical distribution), the exact-boundary quantile, and a constructed case showing the naive median is biased;
 - staging classification on synthetic rows: every verdict, open requests measured to the pull time rather than to a target date in `closed_date`, the under-a-minute boundary, "Unspecified" borough handled as missing;
 - the manifest row-count check in both directions (truncated download, month loaded twice).
+- the report helpers on a small in-memory table: open requests censored rather than dropped, rows with a bad quality verdict excluded, the dashboard's survival curve stepping only at closes, and the unit boundaries in the formatted times.
 
 The tests were mutation-checked: deliberately breaking the at-risk count, the quality rules, the open-request duration, the instant-close boundary, or the row-count check each makes a test fail.
 
